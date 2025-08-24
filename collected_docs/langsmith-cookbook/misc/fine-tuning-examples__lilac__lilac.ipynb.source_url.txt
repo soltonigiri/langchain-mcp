@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-cookbook@main/fine-tuning-examples/lilac/lilac.ipynb

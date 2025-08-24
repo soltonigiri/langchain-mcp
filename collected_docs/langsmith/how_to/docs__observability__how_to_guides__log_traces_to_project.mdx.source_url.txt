@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-docs@main/docs/observability/how_to_guides/log_traces_to_project.mdx

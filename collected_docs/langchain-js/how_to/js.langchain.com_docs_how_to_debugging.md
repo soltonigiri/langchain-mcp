@@ -1,0 +1,3657 @@
+How to debug your LLM apps | 🦜️🔗 Langchain
+- [Skip to main content](#__docusaurus_skipToContent_fallback)Our new LangChain Academy Course Deep Research with LangGraph is now live! [Enroll for free](https://academy.langchain.com/courses/deep-research-with-langgraph/?utm_medium=internal&utm_source=docs&utm_campaign=q3-2025_deep-research-course_co).[On this pageHow to debug your LLM appsLike building any type of software, at some point you&#x27;ll need to debug when building with LLMs. A model call will fail, or model output will be misformatted, or there will be some nested model calls and it won&#x27;t be clear where along the way an incorrect output was created.Here are a few different tools and functionalities to aid in debugging.Tracing​](#tracing)Many of the applications you build with LangChain will contain multiple steps with multiple invocations of LLM calls. As these applications get more and more complex, it becomes crucial to be able to inspect what exactly is going on inside your chain or agent. The best way to do this is with [LangSmith](https://smith.langchain.com).After you sign up at the link above, make sure to set your environment variables to start logging traces:
+
+```shell
+export LANGSMITH_TRACING="true"
+export LANGSMITH_API_KEY="..."
+
+# Reduce tracing latency if you are not in a serverless environment
+# export LANGCHAIN_CALLBACKS_BACKGROUND=true
+
+```Let&#x27;s suppose we have an agent, and want to visualize the actions it takes and tool outputs it receives. Without any debugging, here&#x27;s what we see:
+
+```typescript
+import { ChatAnthropic } from "@langchain/anthropic";
+import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+import { Calculator } from "@langchain/community/tools/calculator";
+
+const tools = [new TavilySearchResults(), new Calculator()];
+
+// Prompt template must have "input" and "agent_scratchpad input variables
+const prompt = ChatPromptTemplate.fromMessages([
+  ["system", "You are a helpful assistant"],
+  ["placeholder", "{chat_history}"],
+  ["human", "{input}"],
+  ["placeholder", "{agent_scratchpad}"],
+]);
+
+const llm = new ChatAnthropic({
+  model: "claude-3-sonnet-20240229",
+  temperature: 0,
+});
+
+const agent = await createToolCallingAgent({
+  llm,
+  tools,
+  prompt,
+});
+
+const agentExecutor = new AgentExecutor({
+  agent,
+  tools,
+});
+
+const result = await agentExecutor.invoke({
+  input:
+    "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+});
+
+console.log(result);
+
+``` #### API Reference: ChatAnthropic from @langchain/anthropic
+- AgentExecutor from langchain/agents
+- createToolCallingAgent from langchain/agents
+- ChatPromptTemplate from @langchain/core/prompts
+- TavilySearchResults from @langchain/community/tools/tavily_search
+- Calculator from @langchain/community/tools/calculator
+
+```bash
+{
+  input: &#x27;Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?&#x27;,
+  output: &#x27;So Christopher Nolan, the director of the 2023 film Oppenheimer, is 53 years old, which is approximately 19,345 days old (assuming 365 days per year).&#x27;
+}
+
+```
+
+We don&#x27;t get much output, but since we set up LangSmith we can easily see what happened under the hood:
+
+[https://smith.langchain.com/public/fd3a4aa1-dfea-4d17-9d44-a306e7b230d3/r](https://smith.langchain.com/public/fd3a4aa1-dfea-4d17-9d44-a306e7b230d3/r)
+
+## verbose[​](#verbose)
+
+If you&#x27;re prototyping in Jupyter Notebooks or running Node scripts, it can be helpful to print out the intermediate steps of a chain run.
+
+There are a number of ways to enable printing at varying degrees of verbosity.
+
+### { verbose: true }[​](#-verbose-true-)
+
+Setting the `verbose` parameter will cause any LangChain component with callback support (chains, models, agents, tools, retrievers) to print the inputs they receive and outputs they generate. This is the most verbose setting and will fully log raw inputs and outputs.
+
+```typescript
+import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+import { Calculator } from "@langchain/community/tools/calculator";
+
+const tools = [
+  new TavilySearchResults({ verbose: true }),
+  new Calculator({ verbose: true }),
+];
+
+// Prompt template must have "input" and "agent_scratchpad input variables
+const prompt = ChatPromptTemplate.fromMessages([
+  ["system", "You are a helpful assistant"],
+  ["placeholder", "{chat_history}"],
+  ["human", "{input}"],
+  ["placeholder", "{agent_scratchpad}"],
+]);
+
+const llm = new ChatAnthropic({
+  model: "claude-3-sonnet-20240229",
+  temperature: 0,
+  verbose: true,
+});
+
+const agent = await createToolCallingAgent({
+  llm,
+  tools,
+  prompt,
+});
+
+const agentExecutor = new AgentExecutor({
+  agent,
+  tools,
+  verbose: true,
+});
+
+const result = await agentExecutor.invoke({
+  input:
+    "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+});
+
+console.log(result);
+
+```
+
+#### API Reference: - AgentExecutor from langchain/agents - createToolCallingAgent from langchain/agents - ChatAnthropic from @langchain/anthropic - ChatPromptTemplate from @langchain/core/prompts - TavilySearchResults from @langchain/community/tools/tavily_search - Calculator from @langchain/community/tools/calculator Console output
+
+```bash
+[chain/start] [1:chain:AgentExecutor] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?"
+}
+[chain/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": []
+}
+[chain/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 3:chain:RunnableAssign] Entering Chain run with input: {
+  "input": ""
+}
+[chain/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 3:chain:RunnableAssign > 4:chain:RunnableMap] Entering Chain run with input: {
+  "input": ""
+}
+[chain/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 3:chain:RunnableAssign > 4:chain:RunnableMap > 5:chain:RunnableLambda] Entering Chain run with input: {
+  "input": ""
+}
+[chain/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 3:chain:RunnableAssign > 4:chain:RunnableMap > 5:chain:RunnableLambda] [0ms] Exiting Chain run with output: {
+  "output": []
+}
+[chain/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 3:chain:RunnableAssign > 4:chain:RunnableMap] [1ms] Exiting Chain run with output: {
+  "agent_scratchpad": []
+}
+[chain/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 3:chain:RunnableAssign] [1ms] Exiting Chain run with output: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [],
+  "agent_scratchpad": []
+}
+[chain/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 6:prompt:ChatPromptTemplate] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [],
+  "agent_scratchpad": []
+}
+[chain/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 6:prompt:ChatPromptTemplate] [0ms] Exiting Chain run with output: {
+  "lc": 1,
+  "type": "constructor",
+  "id": [
+    "langchain_core",
+    "prompt_values",
+    "ChatPromptValue"
+  ],
+  "kwargs": {
+    "messages": [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      }
+    ]
+  }
+}
+[llm/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 7:llm:ChatAnthropic] Entering LLM run with input: {
+  "messages": [
+    [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      }
+    ]
+  ]
+}
+[llm/start] [1:llm:ChatAnthropic] Entering LLM run with input: {
+  "messages": [
+    [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      }
+    ]
+  ]
+}
+[llm/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 7:llm:ChatAnthropic] [1.98s] Exiting LLM run with output: {
+  "generations": [
+    [
+      {
+        "text": "",
+        "message": {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "name": "tavily_search_results_json",
+                "input": {
+                  "input": "Oppenheimer 2023 film director age"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_015MqAHr84dBCAqBgjou41Km",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 409,
+                "output_tokens": 68
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "tavily_search_results_json",
+                "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "tavily_search_results_json",
+                "args": {
+                  "input": "Oppenheimer 2023 film director age"
+                },
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      }
+    ]
+  ]
+}
+[llm/end] [1:llm:ChatAnthropic] [1.98s] Exiting LLM run with output: {
+  "generations": [
+    [
+      {
+        "text": "",
+        "message": {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "name": "tavily_search_results_json",
+                "input": {
+                  "input": "Oppenheimer 2023 film director age"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_015MqAHr84dBCAqBgjou41Km",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 409,
+                "output_tokens": 68
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "tavily_search_results_json",
+                "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "tavily_search_results_json",
+                "args": {
+                  "input": "Oppenheimer 2023 film director age"
+                },
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      }
+    ]
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 8:parser:ToolCallingAgentOutputParser] Entering Chain run with input: {
+  "lc": 1,
+  "type": "constructor",
+  "id": [
+    "langchain_core",
+    "messages",
+    "AIMessageChunk"
+  ],
+  "kwargs": {
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "name": "tavily_search_results_json",
+        "input": {
+          "input": "Oppenheimer 2023 film director age"
+        }
+      }
+    ],
+    "additional_kwargs": {
+      "id": "msg_015MqAHr84dBCAqBgjou41Km",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-3-sonnet-20240229",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 409,
+        "output_tokens": 68
+      },
+      "stop_reason": "tool_use"
+    },
+    "tool_call_chunks": [
+      {
+        "name": "tavily_search_results_json",
+        "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+        "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "index": 0
+      }
+    ],
+    "tool_calls": [
+      {
+        "name": "tavily_search_results_json",
+        "args": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+      }
+    ],
+    "invalid_tool_calls": [],
+    "response_metadata": {}
+  }
+}
+[chain/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent > 8:parser:ToolCallingAgentOutputParser] [0ms] Exiting Chain run with output: {
+  "output": [
+    {
+      "tool": "tavily_search_results_json",
+      "toolInput": {
+        "input": "Oppenheimer 2023 film director age"
+      },
+      "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+      "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+      "messageLog": [
+        {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "name": "tavily_search_results_json",
+                "input": {
+                  "input": "Oppenheimer 2023 film director age"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_015MqAHr84dBCAqBgjou41Km",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 409,
+                "output_tokens": 68
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "tavily_search_results_json",
+                "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "tavily_search_results_json",
+                "args": {
+                  "input": "Oppenheimer 2023 film director age"
+                },
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      ]
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 2:chain:ToolCallingAgent] [1.98s] Exiting Chain run with output: {
+  "output": [
+    {
+      "tool": "tavily_search_results_json",
+      "toolInput": {
+        "input": "Oppenheimer 2023 film director age"
+      },
+      "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+      "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+      "messageLog": [
+        {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "name": "tavily_search_results_json",
+                "input": {
+                  "input": "Oppenheimer 2023 film director age"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_015MqAHr84dBCAqBgjou41Km",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 409,
+                "output_tokens": 68
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "tavily_search_results_json",
+                "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "tavily_search_results_json",
+                "args": {
+                  "input": "Oppenheimer 2023 film director age"
+                },
+                "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      ]
+    }
+  ]
+}
+[agent/action] [1:chain:AgentExecutor] Agent selected action: {
+  "tool": "tavily_search_results_json",
+  "toolInput": {
+    "input": "Oppenheimer 2023 film director age"
+  },
+  "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+  "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+  "messageLog": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[tool/start] [1:chain:AgentExecutor > 9:tool:TavilySearchResults] Entering Tool run with input: "Oppenheimer 2023 film director age"
+[tool/start] [1:tool:TavilySearchResults] Entering Tool run with input: "Oppenheimer 2023 film director age"
+[tool/end] [1:chain:AgentExecutor > 9:tool:TavilySearchResults] [2.20s] Exiting Tool run with output: "[{"title":"Oppenheimer (2023) - IMDb","url":"https://www.imdb.com/title/tt15398776/","content":"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.","score":0.96643,"raw_content":null},{"title":"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes","url":"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/","content":"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.","score":0.92804,"raw_content":null},{"title":"Oppenheimer (film) - Wikipedia","url":"https://en.wikipedia.org/wiki/Oppenheimer_(film)","content":"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\nCritical response\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \"more objective view of his story from a different character&#x27;s point of view\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \"big-atures\", since the special effects team had tried to build the models as physically large as possible. He felt that \"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \"emotional\" and resembling that of a thriller, while also remarking that Nolan had \"Trojan-Horsed a biopic into a thriller\".[72]\nCasting\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\", while also underscoring that it is a \"huge shift in perception about the reality of Oppenheimer&#x27;s perception\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.","score":0.92404,"raw_content":null},{"title":"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \"I Try to ...","url":"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/","content":"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\nRELATED:\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\nCONNECT  FacebookTwitterInstagram\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\n Subscribe\nEverything Zoomer\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.","score":0.92002,"raw_content":null},{"title":"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times","url":"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html","content":"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\n","score":0.91831,"raw_content":null}]"
+[tool/end] [1:tool:TavilySearchResults] [2.20s] Exiting Tool run with output: "[{"title":"Oppenheimer (2023) - IMDb","url":"https://www.imdb.com/title/tt15398776/","content":"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.","score":0.96643,"raw_content":null},{"title":"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes","url":"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/","content":"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.","score":0.92804,"raw_content":null},{"title":"Oppenheimer (film) - Wikipedia","url":"https://en.wikipedia.org/wiki/Oppenheimer_(film)","content":"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\nCritical response\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \"more objective view of his story from a different character&#x27;s point of view\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \"big-atures\", since the special effects team had tried to build the models as physically large as possible. He felt that \"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \"emotional\" and resembling that of a thriller, while also remarking that Nolan had \"Trojan-Horsed a biopic into a thriller\".[72]\nCasting\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\", while also underscoring that it is a \"huge shift in perception about the reality of Oppenheimer&#x27;s perception\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.","score":0.92404,"raw_content":null},{"title":"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \"I Try to ...","url":"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/","content":"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\nRELATED:\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\nCONNECT  FacebookTwitterInstagram\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\n Subscribe\nEverything Zoomer\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.","score":0.92002,"raw_content":null},{"title":"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times","url":"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html","content":"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\n","score":0.91831,"raw_content":null}]"
+[chain/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [
+    {
+      "action": {
+        "tool": "tavily_search_results_json",
+        "toolInput": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "name": "tavily_search_results_json",
+                  "input": {
+                    "input": "Oppenheimer 2023 film director age"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_015MqAHr84dBCAqBgjou41Km",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 409,
+                  "output_tokens": 68
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": {
+                    "input": "Oppenheimer 2023 film director age"
+                  },
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]"
+    }
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 11:chain:RunnableAssign] Entering Chain run with input: {
+  "input": ""
+}
+[chain/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 11:chain:RunnableAssign > 12:chain:RunnableMap] Entering Chain run with input: {
+  "input": ""
+}
+[chain/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 11:chain:RunnableAssign > 12:chain:RunnableMap > 13:chain:RunnableLambda] Entering Chain run with input: {
+  "input": ""
+}
+[chain/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 11:chain:RunnableAssign > 12:chain:RunnableMap > 13:chain:RunnableLambda] [1ms] Exiting Chain run with output: {
+  "output": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 11:chain:RunnableAssign > 12:chain:RunnableMap] [2ms] Exiting Chain run with output: {
+  "agent_scratchpad": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 11:chain:RunnableAssign] [3ms] Exiting Chain run with output: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [
+    {
+      "action": {
+        "tool": "tavily_search_results_json",
+        "toolInput": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "name": "tavily_search_results_json",
+                  "input": {
+                    "input": "Oppenheimer 2023 film director age"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_015MqAHr84dBCAqBgjou41Km",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 409,
+                  "output_tokens": 68
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": {
+                    "input": "Oppenheimer 2023 film director age"
+                  },
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]"
+    }
+  ],
+  "agent_scratchpad": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 14:prompt:ChatPromptTemplate] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [
+    {
+      "action": {
+        "tool": "tavily_search_results_json",
+        "toolInput": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "name": "tavily_search_results_json",
+                  "input": {
+                    "input": "Oppenheimer 2023 film director age"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_015MqAHr84dBCAqBgjou41Km",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 409,
+                  "output_tokens": 68
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": {
+                    "input": "Oppenheimer 2023 film director age"
+                  },
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]"
+    }
+  ],
+  "agent_scratchpad": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 14:prompt:ChatPromptTemplate] [2ms] Exiting Chain run with output: {
+  "lc": 1,
+  "type": "constructor",
+  "id": [
+    "langchain_core",
+    "prompt_values",
+    "ChatPromptValue"
+  ],
+  "kwargs": {
+    "messages": [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "name": "tavily_search_results_json",
+              "input": {
+                "input": "Oppenheimer 2023 film director age"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_015MqAHr84dBCAqBgjou41Km",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 409,
+              "output_tokens": 68
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "tavily_search_results_json",
+              "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "tavily_search_results_json",
+              "args": {
+                "input": "Oppenheimer 2023 film director age"
+              },
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+          "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+          "additional_kwargs": {
+            "name": "tavily_search_results_json"
+          },
+          "response_metadata": {}
+        }
+      }
+    ]
+  }
+}
+[llm/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 15:llm:ChatAnthropic] Entering LLM run with input: {
+  "messages": [
+    [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "name": "tavily_search_results_json",
+              "input": {
+                "input": "Oppenheimer 2023 film director age"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_015MqAHr84dBCAqBgjou41Km",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 409,
+              "output_tokens": 68
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "tavily_search_results_json",
+              "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "tavily_search_results_json",
+              "args": {
+                "input": "Oppenheimer 2023 film director age"
+              },
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+          "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+          "additional_kwargs": {
+            "name": "tavily_search_results_json"
+          },
+          "response_metadata": {}
+        }
+      }
+    ]
+  ]
+}
+[llm/start] [1:llm:ChatAnthropic] Entering LLM run with input: {
+  "messages": [
+    [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "name": "tavily_search_results_json",
+              "input": {
+                "input": "Oppenheimer 2023 film director age"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_015MqAHr84dBCAqBgjou41Km",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 409,
+              "output_tokens": 68
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "tavily_search_results_json",
+              "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "tavily_search_results_json",
+              "args": {
+                "input": "Oppenheimer 2023 film director age"
+              },
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+          "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+          "additional_kwargs": {
+            "name": "tavily_search_results_json"
+          },
+          "response_metadata": {}
+        }
+      }
+    ]
+  ]
+}
+[llm/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 15:llm:ChatAnthropic] [3.50s] Exiting LLM run with output: {
+  "generations": [
+    [
+      {
+        "text": "",
+        "message": {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "name": "calculator",
+                "input": {
+                  "input": "52 * 365"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 2810,
+                "output_tokens": 137
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "calculator",
+                "args": "{\"input\":\"52 * 365\"}",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "calculator",
+                "args": {
+                  "input": "52 * 365"
+                },
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      }
+    ]
+  ]
+}
+[llm/end] [1:llm:ChatAnthropic] [3.50s] Exiting LLM run with output: {
+  "generations": [
+    [
+      {
+        "text": "",
+        "message": {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "name": "calculator",
+                "input": {
+                  "input": "52 * 365"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 2810,
+                "output_tokens": 137
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "calculator",
+                "args": "{\"input\":\"52 * 365\"}",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "calculator",
+                "args": {
+                  "input": "52 * 365"
+                },
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      }
+    ]
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 16:parser:ToolCallingAgentOutputParser] Entering Chain run with input: {
+  "lc": 1,
+  "type": "constructor",
+  "id": [
+    "langchain_core",
+    "messages",
+    "AIMessageChunk"
+  ],
+  "kwargs": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "name": "calculator",
+        "input": {
+          "input": "52 * 365"
+        }
+      }
+    ],
+    "additional_kwargs": {
+      "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-3-sonnet-20240229",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 2810,
+        "output_tokens": 137
+      },
+      "stop_reason": "tool_use"
+    },
+    "tool_call_chunks": [
+      {
+        "name": "calculator",
+        "args": "{\"input\":\"52 * 365\"}",
+        "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "index": 0
+      }
+    ],
+    "tool_calls": [
+      {
+        "name": "calculator",
+        "args": {
+          "input": "52 * 365"
+        },
+        "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+      }
+    ],
+    "invalid_tool_calls": [],
+    "response_metadata": {}
+  }
+}
+[chain/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent > 16:parser:ToolCallingAgentOutputParser] [1ms] Exiting Chain run with output: {
+  "output": [
+    {
+      "tool": "calculator",
+      "toolInput": {
+        "input": "52 * 365"
+      },
+      "toolCallId": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+      "log": "Invoking \"calculator\" with {\"input\":\"52 * 365\"}\n[{\"type\":\"text\",\"text\":\"Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\\n\\n- He is a British-American film director, producer and screenwriter.\\n- He was born on July 30, 1970, making him currently 52 years old.\\n\\nTo calculate his age in days:\"},{\"type\":\"tool_use\",\"id\":\"toolu_01NVTbm5aNYSm1wGYb6XF7jE\",\"name\":\"calculator\",\"input\":{\"input\":\"52 * 365\"}}]",
+      "messageLog": [
+        {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "name": "calculator",
+                "input": {
+                  "input": "52 * 365"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 2810,
+                "output_tokens": 137
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "calculator",
+                "args": "{\"input\":\"52 * 365\"}",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "calculator",
+                "args": {
+                  "input": "52 * 365"
+                },
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      ]
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 10:chain:ToolCallingAgent] [3.51s] Exiting Chain run with output: {
+  "output": [
+    {
+      "tool": "calculator",
+      "toolInput": {
+        "input": "52 * 365"
+      },
+      "toolCallId": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+      "log": "Invoking \"calculator\" with {\"input\":\"52 * 365\"}\n[{\"type\":\"text\",\"text\":\"Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\\n\\n- He is a British-American film director, producer and screenwriter.\\n- He was born on July 30, 1970, making him currently 52 years old.\\n\\nTo calculate his age in days:\"},{\"type\":\"tool_use\",\"id\":\"toolu_01NVTbm5aNYSm1wGYb6XF7jE\",\"name\":\"calculator\",\"input\":{\"input\":\"52 * 365\"}}]",
+      "messageLog": [
+        {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "name": "calculator",
+                "input": {
+                  "input": "52 * 365"
+                }
+              }
+            ],
+            "additional_kwargs": {
+              "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 2810,
+                "output_tokens": 137
+              },
+              "stop_reason": "tool_use"
+            },
+            "tool_call_chunks": [
+              {
+                "name": "calculator",
+                "args": "{\"input\":\"52 * 365\"}",
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                "index": 0
+              }
+            ],
+            "tool_calls": [
+              {
+                "name": "calculator",
+                "args": {
+                  "input": "52 * 365"
+                },
+                "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      ]
+    }
+  ]
+}
+[agent/action] [1:chain:AgentExecutor] Agent selected action: {
+  "tool": "calculator",
+  "toolInput": {
+    "input": "52 * 365"
+  },
+  "toolCallId": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+  "log": "Invoking \"calculator\" with {\"input\":\"52 * 365\"}\n[{\"type\":\"text\",\"text\":\"Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\\n\\n- He is a British-American film director, producer and screenwriter.\\n- He was born on July 30, 1970, making him currently 52 years old.\\n\\nTo calculate his age in days:\"},{\"type\":\"tool_use\",\"id\":\"toolu_01NVTbm5aNYSm1wGYb6XF7jE\",\"name\":\"calculator\",\"input\":{\"input\":\"52 * 365\"}}]",
+  "messageLog": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "name": "calculator",
+            "input": {
+              "input": "52 * 365"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 2810,
+            "output_tokens": 137
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "calculator",
+            "args": "{\"input\":\"52 * 365\"}",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "calculator",
+            "args": {
+              "input": "52 * 365"
+            },
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[tool/start] [1:chain:AgentExecutor > 17:tool:Calculator] Entering Tool run with input: "52 * 365"
+[tool/start] [1:tool:Calculator] Entering Tool run with input: "52 * 365"
+[tool/end] [1:chain:AgentExecutor > 17:tool:Calculator] [3ms] Exiting Tool run with output: "18980"
+[tool/end] [1:tool:Calculator] [3ms] Exiting Tool run with output: "18980"
+[chain/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [
+    {
+      "action": {
+        "tool": "tavily_search_results_json",
+        "toolInput": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "name": "tavily_search_results_json",
+                  "input": {
+                    "input": "Oppenheimer 2023 film director age"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_015MqAHr84dBCAqBgjou41Km",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 409,
+                  "output_tokens": 68
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": {
+                    "input": "Oppenheimer 2023 film director age"
+                  },
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]"
+    },
+    {
+      "action": {
+        "tool": "calculator",
+        "toolInput": {
+          "input": "52 * 365"
+        },
+        "toolCallId": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "log": "Invoking \"calculator\" with {\"input\":\"52 * 365\"}\n[{\"type\":\"text\",\"text\":\"Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\\n\\n- He is a British-American film director, producer and screenwriter.\\n- He was born on July 30, 1970, making him currently 52 years old.\\n\\nTo calculate his age in days:\"},{\"type\":\"tool_use\",\"id\":\"toolu_01NVTbm5aNYSm1wGYb6XF7jE\",\"name\":\"calculator\",\"input\":{\"input\":\"52 * 365\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+                },
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                  "name": "calculator",
+                  "input": {
+                    "input": "52 * 365"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 2810,
+                  "output_tokens": 137
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "calculator",
+                  "args": "{\"input\":\"52 * 365\"}",
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "calculator",
+                  "args": {
+                    "input": "52 * 365"
+                  },
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "18980"
+    }
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 19:chain:RunnableAssign] Entering Chain run with input: {
+  "input": ""
+}
+[chain/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 19:chain:RunnableAssign > 20:chain:RunnableMap] Entering Chain run with input: {
+  "input": ""
+}
+[chain/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 19:chain:RunnableAssign > 20:chain:RunnableMap > 21:chain:RunnableLambda] Entering Chain run with input: {
+  "input": ""
+}
+[chain/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 19:chain:RunnableAssign > 20:chain:RunnableMap > 21:chain:RunnableLambda] [1ms] Exiting Chain run with output: {
+  "output": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "name": "calculator",
+            "input": {
+              "input": "52 * 365"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 2810,
+            "output_tokens": 137
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "calculator",
+            "args": "{\"input\":\"52 * 365\"}",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "calculator",
+            "args": {
+              "input": "52 * 365"
+            },
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "content": "18980",
+        "additional_kwargs": {
+          "name": "calculator"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 19:chain:RunnableAssign > 20:chain:RunnableMap] [2ms] Exiting Chain run with output: {
+  "agent_scratchpad": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "name": "calculator",
+            "input": {
+              "input": "52 * 365"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 2810,
+            "output_tokens": 137
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "calculator",
+            "args": "{\"input\":\"52 * 365\"}",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "calculator",
+            "args": {
+              "input": "52 * 365"
+            },
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "content": "18980",
+        "additional_kwargs": {
+          "name": "calculator"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 19:chain:RunnableAssign] [4ms] Exiting Chain run with output: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [
+    {
+      "action": {
+        "tool": "tavily_search_results_json",
+        "toolInput": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "name": "tavily_search_results_json",
+                  "input": {
+                    "input": "Oppenheimer 2023 film director age"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_015MqAHr84dBCAqBgjou41Km",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 409,
+                  "output_tokens": 68
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": {
+                    "input": "Oppenheimer 2023 film director age"
+                  },
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]"
+    },
+    {
+      "action": {
+        "tool": "calculator",
+        "toolInput": {
+          "input": "52 * 365"
+        },
+        "toolCallId": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "log": "Invoking \"calculator\" with {\"input\":\"52 * 365\"}\n[{\"type\":\"text\",\"text\":\"Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\\n\\n- He is a British-American film director, producer and screenwriter.\\n- He was born on July 30, 1970, making him currently 52 years old.\\n\\nTo calculate his age in days:\"},{\"type\":\"tool_use\",\"id\":\"toolu_01NVTbm5aNYSm1wGYb6XF7jE\",\"name\":\"calculator\",\"input\":{\"input\":\"52 * 365\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+                },
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                  "name": "calculator",
+                  "input": {
+                    "input": "52 * 365"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 2810,
+                  "output_tokens": 137
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "calculator",
+                  "args": "{\"input\":\"52 * 365\"}",
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "calculator",
+                  "args": {
+                    "input": "52 * 365"
+                  },
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "18980"
+    }
+  ],
+  "agent_scratchpad": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "name": "calculator",
+            "input": {
+              "input": "52 * 365"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 2810,
+            "output_tokens": 137
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "calculator",
+            "args": "{\"input\":\"52 * 365\"}",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "calculator",
+            "args": {
+              "input": "52 * 365"
+            },
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "content": "18980",
+        "additional_kwargs": {
+          "name": "calculator"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 22:prompt:ChatPromptTemplate] Entering Chain run with input: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "steps": [
+    {
+      "action": {
+        "tool": "tavily_search_results_json",
+        "toolInput": {
+          "input": "Oppenheimer 2023 film director age"
+        },
+        "toolCallId": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "log": "Invoking \"tavily_search_results_json\" with {\"input\":\"Oppenheimer 2023 film director age\"}\n[{\"type\":\"tool_use\",\"id\":\"toolu_01NUVejujVo2y8WGVtZ49KAN\",\"name\":\"tavily_search_results_json\",\"input\":{\"input\":\"Oppenheimer 2023 film director age\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "name": "tavily_search_results_json",
+                  "input": {
+                    "input": "Oppenheimer 2023 film director age"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_015MqAHr84dBCAqBgjou41Km",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 409,
+                  "output_tokens": 68
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "tavily_search_results_json",
+                  "args": {
+                    "input": "Oppenheimer 2023 film director age"
+                  },
+                  "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]"
+    },
+    {
+      "action": {
+        "tool": "calculator",
+        "toolInput": {
+          "input": "52 * 365"
+        },
+        "toolCallId": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "log": "Invoking \"calculator\" with {\"input\":\"52 * 365\"}\n[{\"type\":\"text\",\"text\":\"Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\\n\\n- He is a British-American film director, producer and screenwriter.\\n- He was born on July 30, 1970, making him currently 52 years old.\\n\\nTo calculate his age in days:\"},{\"type\":\"tool_use\",\"id\":\"toolu_01NVTbm5aNYSm1wGYb6XF7jE\",\"name\":\"calculator\",\"input\":{\"input\":\"52 * 365\"}}]",
+        "messageLog": [
+          {
+            "lc": 1,
+            "type": "constructor",
+            "id": [
+              "langchain_core",
+              "messages",
+              "AIMessageChunk"
+            ],
+            "kwargs": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+                },
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                  "name": "calculator",
+                  "input": {
+                    "input": "52 * 365"
+                  }
+                }
+              ],
+              "additional_kwargs": {
+                "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-3-sonnet-20240229",
+                "stop_sequence": null,
+                "usage": {
+                  "input_tokens": 2810,
+                  "output_tokens": 137
+                },
+                "stop_reason": "tool_use"
+              },
+              "tool_call_chunks": [
+                {
+                  "name": "calculator",
+                  "args": "{\"input\":\"52 * 365\"}",
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+                  "index": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "name": "calculator",
+                  "args": {
+                    "input": "52 * 365"
+                  },
+                  "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+                }
+              ],
+              "invalid_tool_calls": [],
+              "response_metadata": {}
+            }
+          }
+        ]
+      },
+      "observation": "18980"
+    }
+  ],
+  "agent_scratchpad": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "name": "tavily_search_results_json",
+            "input": {
+              "input": "Oppenheimer 2023 film director age"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_015MqAHr84dBCAqBgjou41Km",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 409,
+            "output_tokens": 68
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "tavily_search_results_json",
+            "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "tavily_search_results_json",
+            "args": {
+              "input": "Oppenheimer 2023 film director age"
+            },
+            "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+        "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+        "additional_kwargs": {
+          "name": "tavily_search_results_json"
+        },
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessageChunk"
+      ],
+      "kwargs": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "name": "calculator",
+            "input": {
+              "input": "52 * 365"
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-3-sonnet-20240229",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 2810,
+            "output_tokens": 137
+          },
+          "stop_reason": "tool_use"
+        },
+        "tool_call_chunks": [
+          {
+            "name": "calculator",
+            "args": "{\"input\":\"52 * 365\"}",
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+            "index": 0
+          }
+        ],
+        "tool_calls": [
+          {
+            "name": "calculator",
+            "args": {
+              "input": "52 * 365"
+            },
+            "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+        "content": "18980",
+        "additional_kwargs": {
+          "name": "calculator"
+        },
+        "response_metadata": {}
+      }
+    }
+  ]
+}
+[chain/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 22:prompt:ChatPromptTemplate] [2ms] Exiting Chain run with output: {
+  "lc": 1,
+  "type": "constructor",
+  "id": [
+    "langchain_core",
+    "prompt_values",
+    "ChatPromptValue"
+  ],
+  "kwargs": {
+    "messages": [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "name": "tavily_search_results_json",
+              "input": {
+                "input": "Oppenheimer 2023 film director age"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_015MqAHr84dBCAqBgjou41Km",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 409,
+              "output_tokens": 68
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "tavily_search_results_json",
+              "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "tavily_search_results_json",
+              "args": {
+                "input": "Oppenheimer 2023 film director age"
+              },
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+          "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+          "additional_kwargs": {
+            "name": "tavily_search_results_json"
+          },
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+              "name": "calculator",
+              "input": {
+                "input": "52 * 365"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 2810,
+              "output_tokens": 137
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "calculator",
+              "args": "{\"input\":\"52 * 365\"}",
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "calculator",
+              "args": {
+                "input": "52 * 365"
+              },
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+          "content": "18980",
+          "additional_kwargs": {
+            "name": "calculator"
+          },
+          "response_metadata": {}
+        }
+      }
+    ]
+  }
+}
+[llm/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 23:llm:ChatAnthropic] Entering LLM run with input: {
+  "messages": [
+    [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "name": "tavily_search_results_json",
+              "input": {
+                "input": "Oppenheimer 2023 film director age"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_015MqAHr84dBCAqBgjou41Km",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 409,
+              "output_tokens": 68
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "tavily_search_results_json",
+              "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "tavily_search_results_json",
+              "args": {
+                "input": "Oppenheimer 2023 film director age"
+              },
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+          "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+          "additional_kwargs": {
+            "name": "tavily_search_results_json"
+          },
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+              "name": "calculator",
+              "input": {
+                "input": "52 * 365"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 2810,
+              "output_tokens": 137
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "calculator",
+              "args": "{\"input\":\"52 * 365\"}",
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "calculator",
+              "args": {
+                "input": "52 * 365"
+              },
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+          "content": "18980",
+          "additional_kwargs": {
+            "name": "calculator"
+          },
+          "response_metadata": {}
+        }
+      }
+    ]
+  ]
+}
+[llm/start] [1:llm:ChatAnthropic] Entering LLM run with input: {
+  "messages": [
+    [
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "SystemMessage"
+        ],
+        "kwargs": {
+          "content": "You are a helpful assistant",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "HumanMessage"
+        ],
+        "kwargs": {
+          "content": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+          "additional_kwargs": {},
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "name": "tavily_search_results_json",
+              "input": {
+                "input": "Oppenheimer 2023 film director age"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_015MqAHr84dBCAqBgjou41Km",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 409,
+              "output_tokens": 68
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "tavily_search_results_json",
+              "args": "{\"input\":\"Oppenheimer 2023 film director age\"}",
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "tavily_search_results_json",
+              "args": {
+                "input": "Oppenheimer 2023 film director age"
+              },
+              "id": "toolu_01NUVejujVo2y8WGVtZ49KAN"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NUVejujVo2y8WGVtZ49KAN",
+          "content": "[{\"title\":\"Oppenheimer (2023) - IMDb\",\"url\":\"https://www.imdb.com/title/tt15398776/\",\"content\":\"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.\",\"score\":0.96643,\"raw_content\":null},{\"title\":\"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes\",\"url\":\"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/\",\"content\":\"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.\",\"score\":0.92804,\"raw_content\":null},{\"title\":\"Oppenheimer (film) - Wikipedia\",\"url\":\"https://en.wikipedia.org/wiki/Oppenheimer_(film)\",\"content\":\"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\\nCritical response\\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \\\"more objective view of his story from a different character&#x27;s point of view\\\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \\\"big-atures\\\", since the special effects team had tried to build the models as physically large as possible. He felt that \\\"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\\\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \\\"emotional\\\" and resembling that of a thriller, while also remarking that Nolan had \\\"Trojan-Horsed a biopic into a thriller\\\".[72]\\nCasting\\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\\\", while also underscoring that it is a \\\"huge shift in perception about the reality of Oppenheimer&#x27;s perception\\\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \\\"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\\\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.\",\"score\":0.92404,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Director Christopher Nolan On Filmmaking at 53: \\\"I Try to ...\",\"url\":\"https://www.everythingzoomer.com/arts-entertainment/2023/11/21/oppenheimer-director-christopher-nolan-on-filmmaking-at-53-i-try-to-challenge-myself-with-every-film/\",\"content\":\"Oppenheimer will be available to own on 4K Ultra HD, Blu-ray and DVD — including more than three hours of bonus features — on November 21.\\nRELATED:\\nVisiting the Trinity Site Featured in ‘Oppenheimer’ Is a Sobering Reminder of the Horror of Nuclear Weapons\\nBarbenheimer: How ‘Barbie’ and ‘Oppenheimer’ Became the Unlikely Movie Marriage of the Summer\\nBlast From the Past: ‘Asteroid City’ & ‘Oppenheimer’ and the Age of Nuclear Anxiety\\nEXPLORE  HealthMoneyTravelFoodStyleBook ClubClassifieds#ZoomerDailyPolicy & PerspectiveArts & EntertainmentStars & RoyaltySex & Love\\nCONNECT  FacebookTwitterInstagram\\nSUBSCRIBE  Terms of Subscription ServiceE-NewslettersSubscribe to Zoomer Magazine\\nBROWSE  AboutMastheadContact UsAdvertise with UsPrivacy Policy\\nEverythingZoomer.com is part of the ZoomerMedia Digital Network “I think with experience — and with the experience of watching your films with an audience over the years — you do more and more recognize the human elements that people respond to, and the things that move you and the things that move the audience.”\\n “What’s interesting, as you watch the films over time, is that some of his preoccupations are the same, but then some of them have changed over time with who he is as a person and what’s going on in his own life,” Thomas said.\\n The British-American director’s latest explosive drama, Oppenheimer, which has earned upwards of US$940 million at the global box office, follows theoretical physicist J. Robert Oppenheimer (played by Cillian Murphy) as he leads the team creating the first atomic bomb, as director of the Manhattan Project’s Los Alamos Laboratory.\\n Subscribe\\nEverything Zoomer\\n‘Oppenheimer’ Director Christopher Nolan On Filmmaking at 53: “I Try to Challenge Myself with Every Film”\\nDirector Christopher Nolan poses upon his arrival for the premiere of the movie &#x27;Oppenheimer&#x27; in Paris on July 11, 2023.\",\"score\":0.92002,\"raw_content\":null},{\"title\":\"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times\",\"url\":\"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html\",\"content\":\"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\\n\",\"score\":0.91831,\"raw_content\":null}]",
+          "additional_kwargs": {
+            "name": "tavily_search_results_json"
+          },
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "AIMessageChunk"
+        ],
+        "kwargs": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Based on the search results, the 2023 film Oppenheimer was directed by Christopher Nolan. Some key information about Christopher Nolan:\n\n- He is a British-American film director, producer and screenwriter.\n- He was born on July 30, 1970, making him currently 52 years old.\n\nTo calculate his age in days:"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+              "name": "calculator",
+              "input": {
+                "input": "52 * 365"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "id": "msg_01RBDqmJKNXiEjgt5Xrng4mz",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-3-sonnet-20240229",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 2810,
+              "output_tokens": 137
+            },
+            "stop_reason": "tool_use"
+          },
+          "tool_call_chunks": [
+            {
+              "name": "calculator",
+              "args": "{\"input\":\"52 * 365\"}",
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+              "index": 0
+            }
+          ],
+          "tool_calls": [
+            {
+              "name": "calculator",
+              "args": {
+                "input": "52 * 365"
+              },
+              "id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "response_metadata": {}
+        }
+      },
+      {
+        "lc": 1,
+        "type": "constructor",
+        "id": [
+          "langchain_core",
+          "messages",
+          "ToolMessage"
+        ],
+        "kwargs": {
+          "tool_call_id": "toolu_01NVTbm5aNYSm1wGYb6XF7jE",
+          "content": "18980",
+          "additional_kwargs": {
+            "name": "calculator"
+          },
+          "response_metadata": {}
+        }
+      }
+    ]
+  ]
+}
+[llm/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 23:llm:ChatAnthropic] [2.16s] Exiting LLM run with output: {
+  "generations": [
+    [
+      {
+        "text": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year).",
+        "message": {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year).",
+            "additional_kwargs": {
+              "id": "msg_01TYp6vJRKJQgXXRoqVrDGTR",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 2960,
+                "output_tokens": 51
+              },
+              "stop_reason": "end_turn"
+            },
+            "tool_call_chunks": [],
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      }
+    ]
+  ]
+}
+[llm/end] [1:llm:ChatAnthropic] [2.16s] Exiting LLM run with output: {
+  "generations": [
+    [
+      {
+        "text": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year).",
+        "message": {
+          "lc": 1,
+          "type": "constructor",
+          "id": [
+            "langchain_core",
+            "messages",
+            "AIMessageChunk"
+          ],
+          "kwargs": {
+            "content": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year).",
+            "additional_kwargs": {
+              "id": "msg_01TYp6vJRKJQgXXRoqVrDGTR",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-3-sonnet-20240229",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 2960,
+                "output_tokens": 51
+              },
+              "stop_reason": "end_turn"
+            },
+            "tool_call_chunks": [],
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "response_metadata": {}
+          }
+        }
+      }
+    ]
+  ]
+}
+[chain/start] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 24:parser:ToolCallingAgentOutputParser] Entering Chain run with input: {
+  "lc": 1,
+  "type": "constructor",
+  "id": [
+    "langchain_core",
+    "messages",
+    "AIMessageChunk"
+  ],
+  "kwargs": {
+    "content": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year).",
+    "additional_kwargs": {
+      "id": "msg_01TYp6vJRKJQgXXRoqVrDGTR",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-3-sonnet-20240229",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 2960,
+        "output_tokens": 51
+      },
+      "stop_reason": "end_turn"
+    },
+    "tool_call_chunks": [],
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "response_metadata": {}
+  }
+}
+[chain/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent > 24:parser:ToolCallingAgentOutputParser] [2ms] Exiting Chain run with output: {
+  "returnValues": {
+    "output": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year)."
+  },
+  "log": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year)."
+}
+[chain/end] [1:chain:AgentExecutor > 18:chain:ToolCallingAgent] [2.20s] Exiting Chain run with output: {
+  "returnValues": {
+    "output": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year)."
+  },
+  "log": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year)."
+}
+[chain/end] [1:chain:AgentExecutor] [9.92s] Exiting Chain run with output: {
+  "input": "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+  "output": "So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is approximately 18,980 days old (assuming 365 days per year)."
+}
+
+``` ### Tool({ ..., verbose: true })[​](#tool--verbose-true-) You can also scope verbosity down to a single object, in which case only the inputs and outputs to that object are printed (along with any additional callbacks calls made specifically by that object).
+
+```typescript
+import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+import { Calculator } from "@langchain/community/tools/calculator";
+
+const tools = [
+  new TavilySearchResults({ verbose: true }),
+  new Calculator({ verbose: true }),
+];
+
+// Prompt template must have "input" and "agent_scratchpad input variables
+const prompt = ChatPromptTemplate.fromMessages([
+  ["system", "You are a helpful assistant"],
+  ["placeholder", "{chat_history}"],
+  ["human", "{input}"],
+  ["placeholder", "{agent_scratchpad}"],
+]);
+
+const llm = new ChatAnthropic({
+  model: "claude-3-sonnet-20240229",
+  temperature: 0,
+  verbose: false,
+});
+
+const agent = await createToolCallingAgent({
+  llm,
+  tools,
+  prompt,
+});
+
+const agentExecutor = new AgentExecutor({
+  agent,
+  tools,
+  verbose: false,
+});
+
+const result = await agentExecutor.invoke({
+  input:
+    "Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?",
+});
+
+console.log(result);
+
+```
+
+#### API Reference: - AgentExecutor from langchain/agents - createToolCallingAgent from langchain/agents - ChatAnthropic from @langchain/anthropic - ChatPromptTemplate from @langchain/core/prompts - TavilySearchResults from @langchain/community/tools/tavily_search - Calculator from @langchain/community/tools/calculator Console output
+
+```bash
+[tool/start] [1:tool:TavilySearchResults] Entering Tool run with input: "Oppenheimer 2023 film director age"
+[tool/end] [1:tool:TavilySearchResults] [1.95s] Exiting Tool run with output: "[{"title":"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times","url":"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html","content":"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\n","score":0.97519,"raw_content":null},{"title":"Oppenheimer&#x27;s Grandson Reacts to New Christopher Nolan Film | TIME","url":"https://time.com/6297743/oppenheimer-grandson-movie-interview/","content":"July 25, 2023 3:32 PM EDT. M oviegoers turned out in droves this weekend for writer-director Christopher Nolan&#x27;s new film Oppenheimer, fueling an expectations-shattering domestic box office debut ...","score":0.95166,"raw_content":null},{"title":"Oppenheimer (2023) - IMDb","url":"https://www.imdb.com/title/tt15398776/","content":"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.","score":0.95127,"raw_content":null},{"title":"Oppenheimer (film) - Wikipedia","url":"https://en.wikipedia.org/wiki/Oppenheimer_(film)","content":"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\nCritical response\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \"more objective view of his story from a different character&#x27;s point of view\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \"big-atures\", since the special effects team had tried to build the models as physically large as possible. He felt that \"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \"emotional\" and resembling that of a thriller, while also remarking that Nolan had \"Trojan-Horsed a biopic into a thriller\".[72]\nCasting\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\", while also underscoring that it is a \"huge shift in perception about the reality of Oppenheimer&#x27;s perception\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.","score":0.92204,"raw_content":null},{"title":"Oppenheimer (2023) - Full Cast & Crew - IMDb","url":"https://www.imdb.com/title/tt15398776/fullcredits/","content":"Oppenheimer (2023) cast and crew credits, including actors, actresses, directors, writers and more. Menu. Movies. Release Calendar Top 250 Movies Most Popular Movies Browse Movies by Genre Top Box Office Showtimes & Tickets Movie News India Movie Spotlight. ... Peter Oppenheimer - Age 8 (uncredited) Adam Walker Federman ... MIT Student ...","score":0.92179,"raw_content":null}]"
+[tool/start] [1:tool:TavilySearchResults] Entering Tool run with input: "Christopher Nolan age"
+[tool/end] [1:tool:TavilySearchResults] [1.15s] Exiting Tool run with output: "[{"title":"Christopher Nolan - IMDb","url":"https://www.imdb.com/name/nm0634240/","content":"Christopher Nolan is a British-American writer-director-producer of acclaimed films such as Inception, The Dark Knight, and Interstellar. He was born on July 30, 1970, in London, England.","score":0.96627,"raw_content":null},{"title":"Christopher Nolan: Biography, Movie Director, Filmmaker","url":"https://www.biography.com/movies-tv/christopher-nolan","content":"To meet the team, visit our About Us page: https://www.biography.com/about/a43602329/about-us\nFilmmakers\nMatt Damon\nGreta Gerwig\nMartin Scorsese\nBradley Cooper\nJodie Foster\nDodi Fayed\nDrew Barrymore\nRyan Gosling Was Reluctant to Play Barbie’s Ken\nThe Actors in the Most Wes Anderson Movies\n“The Idol” Raises Eyesbrows at Cannes\n41 Inspiring Famous Women in History\nBen Affleck and Matt Damon’s Lifelong Friendship\nA Part of Hearst Digital Media\nWe may earn commission from links on this page, but we only recommend products we back.\n The Dark Knight and Inception\nIn July 2008, Nolan’s Batman sequel, The Dark Knight, opened and set the record as having the highest weekend gross in the United States, at $158 million; Knight went on to become one of the top five highest-grossing films in America. In the fall of 2014, Nolan returned to the big screen with Interstellar, a nearly three-hour sci-fi epic that follows the journey of a team of astronauts seeking a new world for the inhabitants of a besieged Earth. The director&#x27;s career then traveled into the stratosphere, when he agreed to helm the re-launch of the comic book hero Batman with the 2005 film Batman Begins, starring Christian Bale as the titular character. Built around three storylines offering different perspectives on a dramatic turn of events in 1940, Dunkirk earned mostly rave reviews for its portrayals of the tensions and terrors of war, picking up Golden Globe nominations for Best Motion Picture—Drama and Best Director, as well as an Academy Award nod for Best Director.\n","score":0.95669,"raw_content":null},{"title":"Christopher Nolan - Biography - IMDb","url":"https://www.imdb.com/name/nm0634240/bio/","content":"Learn about the life and career of acclaimed writer-director Christopher Nolan, who was born on July 30, 1970, in London, England. Find out his filmography, awards, family, trivia and more on IMDb.","score":0.91217,"raw_content":null},{"title":"Christopher Nolan - Wikipedia","url":"https://en.wikipedia.org/wiki/Christopher_Nolan","content":"In early 2003, Nolan approached Warner Bros. with the idea of making a new Batman film, based on the character&#x27;s origin story.[58] Nolan was fascinated by the notion of grounding it in a more realistic world than a comic-book fantasy.[59] He relied heavily on traditional stunts and miniature effects during filming, with minimal use of computer-generated imagery (CGI).[60] Batman Begins (2005), the biggest project Nolan had undertaken to that point,[61] was released to critical acclaim and commercial success.[62][63] Starring Christian Bale as Bruce Wayne / Batman—along with Michael Caine, Gary Oldman, Morgan Freeman and Liam Neeson—Batman Begins revived the franchise.[64][65] Batman Begins was 2005&#x27;s ninth-highest-grossing film and was praised for its psychological depth and contemporary relevance;[63][66] it is cited as one of the most influential films of the 2000s.[67] Film author Ian Nathan wrote that within five years of his career, Nolan \"[went] from unknown to indie darling to gaining creative control over one of the biggest properties in Hollywood, and (perhaps unwittingly) fomenting the genre that would redefine the entire industry\".[68]\nNolan directed, co-wrote and produced The Prestige (2006), an adaptation of the Christopher Priest novel about two rival 19th-century magicians.[69] He directed, wrote and edited the short film Larceny (1996),[19] which was filmed over a weekend in black and white with limited equipment and a small cast and crew.[12][20] Funded by Nolan and shot with the UCL Union Film society&#x27;s equipment, it appeared at the Cambridge Film Festival in 1996 and is considered one of UCL&#x27;s best shorts.[21] For unknown reasons, the film has since been removed from public view.[19] Nolan filmed a third short, Doodlebug (1997), about a man seemingly chasing an insect with his shoe, only to discover that it is a miniature of himself.[14][22] Nolan and Thomas first attempted to make a feature in the mid-1990s with Larry Mahoney, which they scrapped.[23] During this period in his career, Nolan had little to no success getting his projects off the ground, facing several rejections; he added, \"[T]here&#x27;s a very limited pool of finance in the UK. Philosophy professor David Kyle Johnson wrote that \"Inception became a classic almost as soon as it was projected on silver screens\", praising its exploration of philosophical ideas, including leap of faith and allegory of the cave.[97] The film grossed over $836 million worldwide.[98] Nominated for eight Academy Awards—including Best Picture and Best Original Screenplay—it won Best Cinematography, Best Sound Mixing, Best Sound Editing and Best Visual Effects.[99] Nolan was nominated for a BAFTA Award and a Golden Globe Award for Best Director, among other accolades.[40]\nAround the release of The Dark Knight Rises (2012), Nolan&#x27;s third and final Batman film, Joseph Bevan of the British Film Institute wrote a profile on him: \"In the space of just over a decade, Christopher Nolan has shot from promising British indie director to undisputed master of a new brand of intelligent escapism. He further wrote that Nolan&#x27;s body of work reflect \"a heterogeneity of conditions of products\" extending from low-budget films to lucrative blockbusters, \"a wide range of genres and settings\" and \"a diversity of styles that trumpet his versatility\".[193]\nDavid Bordwell, a film theorist, wrote that Nolan has been able to blend his \"experimental impulses\" with the demands of mainstream entertainment, describing his oeuvre as \"experiments with cinematic time by means of techniques of subjective viewpoint and crosscutting\".[194] Nolan&#x27;s use of practical, in-camera effects, miniatures and models, as well as shooting on celluloid film, has been highly influential in early 21st century cinema.[195][196] IndieWire wrote in 2019 that, Nolan \"kept a viable alternate model of big-budget filmmaking alive\", in an era where blockbuster filmmaking has become \"a largely computer-generated art form\".[196] Initially reluctant to make a sequel, he agreed after Warner Bros. repeatedly insisted.[78] Nolan wanted to expand on the noir quality of the first film by broadening the canvas and taking on \"the dynamic of a story of the city, a large crime story ... where you&#x27;re looking at the police, the justice system, the vigilante, the poor people, the rich people, the criminals\".[79] Continuing to minimalise the use of CGI, Nolan employed high-resolution IMAX cameras, making it the first major motion picture to use this technology.[80][81]","score":0.90288,"raw_content":null},{"title":"Christopher Nolan | Biography, Movies, Batman, Oppenheimer, & Facts ...","url":"https://www.britannica.com/biography/Christopher-Nolan-British-director","content":"The sci-fi drama depicted the efforts of a group of scientists to relocate humanity from an Earth vitiated by war and famine to another planet by way of a wormhole. The film turns on this character’s attempt to move past the boundaries of the technology in order to actually plant an idea in a dreamer’s head. His 2023 film Oppenheimer, depicts J. Robert Oppenheimer’s role in the development of the atomic bomb and the later security hearing over his alleged ties to communism. It used a destabilizing reverse-order story line to mirror the fractured mental state of its protagonist, a man with short-term amnesia who is trying to track down the person who murdered his wife. The Dark Knight (2008) leaned even more heavily on the moral and structural decay of its setting, fictional Gotham City, and it revived such classic Batman villains as the Joker (played by Heath Ledger).","score":0.90219,"raw_content":null}]"
+[tool/start] [1:tool:Calculator] Entering Tool run with input: "(2023 - 1970) * 365"
+[tool/end] [1:tool:Calculator] [3ms] Exiting Tool run with output: "19345"
+{
+  input: &#x27;Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?&#x27;,
+  output: &#x27;So Christopher Nolan, the director of the 2023 film Oppenheimer, is currently 52 years old, which is 19,345 days old (assuming 365 days per year).&#x27;
+}
+MacBook-Pro-4:examples jacoblee$ yarn start examples/src/guides/debugging/simple_agent_verbose_some.ts
+(node:78812) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import &#x27;data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("file%3A///Users/jacoblee/langchain/langchainjs/node_modules/tsx/dist/loader.js", pathToFileURL("./"));&#x27;
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WARN]: You have enabled LangSmith tracing without backgrounding callbacks.
+[WARN]: If you are not using a serverless environment where you must wait for tracing calls to finish,
+[WARN]: we suggest setting "process.env.LANGCHAIN_CALLBACKS_BACKGROUND=true" to avoid additional latency.
+[tool/start] [1:tool:TavilySearchResults] Entering Tool run with input: "Oppenheimer 2023 film director age"
+[tool/end] [1:tool:TavilySearchResults] [1.76s] Exiting Tool run with output: "[{"title":"Oppenheimer (film) - Wikipedia","url":"https://en.wikipedia.org/wiki/Oppenheimer_(film)","content":"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\nCritical response\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \"more objective view of his story from a different character&#x27;s point of view\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \"big-atures\", since the special effects team had tried to build the models as physically large as possible. He felt that \"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \"emotional\" and resembling that of a thriller, while also remarking that Nolan had \"Trojan-Horsed a biopic into a thriller\".[72]\nCasting\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\", while also underscoring that it is a \"huge shift in perception about the reality of Oppenheimer&#x27;s perception\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.","score":0.97075,"raw_content":null},{"title":"Christopher Nolan&#x27;s Oppenheimer - Rotten Tomatoes","url":"https://editorial.rottentomatoes.com/article/everything-we-know-about-christopher-nolans-oppenheimer/","content":"Billboards and movie theater pop-ups across Los Angeles have been ticking down for months now: Christopher Nolan&#x27;s epic account of J. Robert Oppenheimer, the father of the atomic bomb, is nearing an explosive release on July 21, 2023. Nolan movies are always incredibly secretive, twists locked alongside totems behind safe doors, actors not spilling an ounce of Earl Grey tea.","score":0.9684,"raw_content":null},{"title":"Oppenheimer (2023) - Full Cast & Crew - IMDb","url":"https://www.imdb.com/title/tt15398776/fullcredits/","content":"Oppenheimer (2023) cast and crew credits, including actors, actresses, directors, writers and more. Menu. Movies. Release Calendar Top 250 Movies Most Popular Movies Browse Movies by Genre Top Box Office Showtimes & Tickets Movie News India Movie Spotlight. ... Peter Oppenheimer - Age 8 (uncredited) Adam Walker Federman ... MIT Student ...","score":0.94834,"raw_content":null},{"title":"Oppenheimer (2023) - IMDb","url":"https://www.imdb.com/title/tt15398776/","content":"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.","score":0.92995,"raw_content":null},{"title":"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times","url":"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html","content":"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\n","score":0.92512,"raw_content":null}]"
+[tool/start] [1:tool:TavilySearchResults] Entering Tool run with input: "Christopher Nolan age"
+[tool/end] [1:tool:TavilySearchResults] [1.69s] Exiting Tool run with output: "[{"title":"Christopher Nolan: Biography, Movie Director, Filmmaker","url":"https://www.biography.com/movies-tv/christopher-nolan","content":"To meet the team, visit our About Us page: https://www.biography.com/about/a43602329/about-us\nFilmmakers\nMatt Damon\nGreta Gerwig\nMartin Scorsese\nBradley Cooper\nJodie Foster\nDodi Fayed\nDrew Barrymore\nRyan Gosling Was Reluctant to Play Barbie’s Ken\nThe Actors in the Most Wes Anderson Movies\n“The Idol” Raises Eyesbrows at Cannes\n41 Inspiring Famous Women in History\nBen Affleck and Matt Damon’s Lifelong Friendship\nA Part of Hearst Digital Media\nWe may earn commission from links on this page, but we only recommend products we back.\n The Dark Knight and Inception\nIn July 2008, Nolan’s Batman sequel, The Dark Knight, opened and set the record as having the highest weekend gross in the United States, at $158 million; Knight went on to become one of the top five highest-grossing films in America. In the fall of 2014, Nolan returned to the big screen with Interstellar, a nearly three-hour sci-fi epic that follows the journey of a team of astronauts seeking a new world for the inhabitants of a besieged Earth. The director&#x27;s career then traveled into the stratosphere, when he agreed to helm the re-launch of the comic book hero Batman with the 2005 film Batman Begins, starring Christian Bale as the titular character. Built around three storylines offering different perspectives on a dramatic turn of events in 1940, Dunkirk earned mostly rave reviews for its portrayals of the tensions and terrors of war, picking up Golden Globe nominations for Best Motion Picture—Drama and Best Director, as well as an Academy Award nod for Best Director.\n","score":0.96408,"raw_content":null},{"title":"Christopher Nolan - Biography - IMDb","url":"https://www.imdb.com/name/nm0634240/bio/","content":"Learn about the life and career of acclaimed writer-director Christopher Nolan, who was born on July 30, 1970, in London, England. Find out his filmography, awards, family, trivia and more on IMDb.","score":0.95409,"raw_content":null},{"title":"Christopher Nolan - IMDb","url":"https://www.imdb.com/name/nm0634240/","content":"Christopher Nolan is a British-American writer-director-producer of acclaimed films such as Inception, The Dark Knight, and Interstellar. He was born on July 30, 1970, in London, England.","score":0.95401,"raw_content":null},{"title":"Christopher Nolan - Wikipedia","url":"https://en.wikipedia.org/wiki/Christopher_Nolan","content":"In early 2003, Nolan approached Warner Bros. with the idea of making a new Batman film, based on the character&#x27;s origin story.[58] Nolan was fascinated by the notion of grounding it in a more realistic world than a comic-book fantasy.[59] He relied heavily on traditional stunts and miniature effects during filming, with minimal use of computer-generated imagery (CGI).[60] Batman Begins (2005), the biggest project Nolan had undertaken to that point,[61] was released to critical acclaim and commercial success.[62][63] Starring Christian Bale as Bruce Wayne / Batman—along with Michael Caine, Gary Oldman, Morgan Freeman and Liam Neeson—Batman Begins revived the franchise.[64][65] Batman Begins was 2005&#x27;s ninth-highest-grossing film and was praised for its psychological depth and contemporary relevance;[63][66] it is cited as one of the most influential films of the 2000s.[67] Film author Ian Nathan wrote that within five years of his career, Nolan \"[went] from unknown to indie darling to gaining creative control over one of the biggest properties in Hollywood, and (perhaps unwittingly) fomenting the genre that would redefine the entire industry\".[68]\nNolan directed, co-wrote and produced The Prestige (2006), an adaptation of the Christopher Priest novel about two rival 19th-century magicians.[69] He directed, wrote and edited the short film Larceny (1996),[19] which was filmed over a weekend in black and white with limited equipment and a small cast and crew.[12][20] Funded by Nolan and shot with the UCL Union Film society&#x27;s equipment, it appeared at the Cambridge Film Festival in 1996 and is considered one of UCL&#x27;s best shorts.[21] For unknown reasons, the film has since been removed from public view.[19] Nolan filmed a third short, Doodlebug (1997), about a man seemingly chasing an insect with his shoe, only to discover that it is a miniature of himself.[14][22] Nolan and Thomas first attempted to make a feature in the mid-1990s with Larry Mahoney, which they scrapped.[23] During this period in his career, Nolan had little to no success getting his projects off the ground, facing several rejections; he added, \"[T]here&#x27;s a very limited pool of finance in the UK. Philosophy professor David Kyle Johnson wrote that \"Inception became a classic almost as soon as it was projected on silver screens\", praising its exploration of philosophical ideas, including leap of faith and allegory of the cave.[97] The film grossed over $836 million worldwide.[98] Nominated for eight Academy Awards—including Best Picture and Best Original Screenplay—it won Best Cinematography, Best Sound Mixing, Best Sound Editing and Best Visual Effects.[99] Nolan was nominated for a BAFTA Award and a Golden Globe Award for Best Director, among other accolades.[40]\nAround the release of The Dark Knight Rises (2012), Nolan&#x27;s third and final Batman film, Joseph Bevan of the British Film Institute wrote a profile on him: \"In the space of just over a decade, Christopher Nolan has shot from promising British indie director to undisputed master of a new brand of intelligent escapism. He further wrote that Nolan&#x27;s body of work reflect \"a heterogeneity of conditions of products\" extending from low-budget films to lucrative blockbusters, \"a wide range of genres and settings\" and \"a diversity of styles that trumpet his versatility\".[193]\nDavid Bordwell, a film theorist, wrote that Nolan has been able to blend his \"experimental impulses\" with the demands of mainstream entertainment, describing his oeuvre as \"experiments with cinematic time by means of techniques of subjective viewpoint and crosscutting\".[194] Nolan&#x27;s use of practical, in-camera effects, miniatures and models, as well as shooting on celluloid film, has been highly influential in early 21st century cinema.[195][196] IndieWire wrote in 2019 that, Nolan \"kept a viable alternate model of big-budget filmmaking alive\", in an era where blockbuster filmmaking has become \"a largely computer-generated art form\".[196] Initially reluctant to make a sequel, he agreed after Warner Bros. repeatedly insisted.[78] Nolan wanted to expand on the noir quality of the first film by broadening the canvas and taking on \"the dynamic of a story of the city, a large crime story ... where you&#x27;re looking at the police, the justice system, the vigilante, the poor people, the rich people, the criminals\".[79] Continuing to minimalise the use of CGI, Nolan employed high-resolution IMAX cameras, making it the first major motion picture to use this technology.[80][81]","score":0.93205,"raw_content":null},{"title":"Christopher Nolan | Biography, Movies, Batman, Oppenheimer, & Facts ...","url":"https://www.britannica.com/biography/Christopher-Nolan-British-director","content":"The sci-fi drama depicted the efforts of a group of scientists to relocate humanity from an Earth vitiated by war and famine to another planet by way of a wormhole. The film turns on this character’s attempt to move past the boundaries of the technology in order to actually plant an idea in a dreamer’s head. His 2023 film Oppenheimer, depicts J. Robert Oppenheimer’s role in the development of the atomic bomb and the later security hearing over his alleged ties to communism. It used a destabilizing reverse-order story line to mirror the fractured mental state of its protagonist, a man with short-term amnesia who is trying to track down the person who murdered his wife. The Dark Knight (2008) leaned even more heavily on the moral and structural decay of its setting, fictional Gotham City, and it revived such classic Batman villains as the Joker (played by Heath Ledger).","score":0.90859,"raw_content":null}]"
+ [tool/start] [1:tool:Calculator] Entering Tool run with input: "52 * 365"
+[tool/end] [1:tool:Calculator] [2ms] Exiting Tool run with output: "18980"
+{
+  input: &#x27;Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?&#x27;,
+  output: &#x27;<result>\nTherefore, Christopher Nolan is 18,980 days old.\n</result>&#x27;
+}
+MacBook-Pro-4:examples jacoblee$ yarn start examples/src/guides/debugging/simple_agent_verbose_some.ts
+(node:78844) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import &#x27;data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("file%3A///Users/jacoblee/langchain/langchainjs/node_modules/tsx/dist/loader.js", pathToFileURL("./"));&#x27;
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WARN]: You have enabled LangSmith tracing without backgrounding callbacks.
+[WARN]: If you are not using a serverless environment where you must wait for tracing calls to finish,
+[WARN]: we suggest setting "process.env.LANGCHAIN_CALLBACKS_BACKGROUND=true" to avoid additional latency.
+[tool/start] [1:tool:TavilySearchResults] Entering Tool run with input: "Oppenheimer 2023 film director age"
+[tool/end] [1:tool:TavilySearchResults] [2.63s] Exiting Tool run with output: "[{"title":"Oppenheimer (film) - Wikipedia","url":"https://en.wikipedia.org/wiki/Oppenheimer_(film)","content":"The film continued to hold well in the following weeks, making $32 million and $29.1 million in its fifth and sixth weekends.[174][175] As of September 10, 2023, the highest grossing territories were the United Kingdom ($72 million), Germany ($46.9 million), China ($46.8 million), France ($40.1 million) and Australia ($25.9 million).[176]\nCritical response\nThe film received critical acclaim.[a] Critics praised Oppenheimer primarily for its screenplay, the performances of the cast (particularly Murphy and Downey), and the visuals;[b] it was frequently cited as one of Nolan&#x27;s best films,[191][192][183] and of 2023, although some criticism was aimed towards the writing of the female characters.[187] Hindustan Times reported that the film was also hailed as one of the best films of the 21st century.[193] He also chose to alternate between scenes in color and black-and-white to convey the story from both subjective and objective perspectives, respectively,[68] with most of Oppenheimer&#x27;s view shown via the former, while the latter depicts a \"more objective view of his story from a different character&#x27;s point of view\".[69][67] Wanting to make the film as subjective as possible, the production team decided to include visions of Oppenheimer&#x27;s conceptions of the quantum world and waves of energy.[70] Nolan noted that Oppenheimer never publicly apologized for his role in the atomic bombings of Hiroshima and Nagasaki, but still desired to portray Oppenheimer as feeling genuine guilt for his actions, believing this to be accurate.[71]\nI think of any character I&#x27;ve dealt with, Oppenheimer is by far the most ambiguous and paradoxical. The production team was able to obtain government permission to film at White Sands Missile Range, but only at highly inconvenient hours, and therefore chose to film the scene elsewhere in the New Mexico desert.[2][95]\nThe production filmed the Trinity test scenes in Belen, New Mexico, with Murphy climbing a 100-foot steel tower, a replica of the original site used in the Manhattan Project, in rough weather.[2][95]\nA special set was built in which gasoline, propane, aluminum powder, and magnesium were used to create the explosive effect.[54] Although they used miniatures for the practical effect, the film&#x27;s special effects supervisor Scott R. Fisher referred to them as \"big-atures\", since the special effects team had tried to build the models as physically large as possible. He felt that \"while our relationship with that [nuclear] fear has ebbed and flowed with time, the threat itself never actually went away\", and felt the 2022 Russian invasion of Ukraine had caused a resurgence of nuclear anxiety.[54] Nolan had also penned a script for a biopic of Howard Hughes approximately during the time of production of Martin Scorsese&#x27;s The Aviator (2004), which had given him insight on how to write a script regarding a person&#x27;s life.[53] Emily Blunt described the Oppenheimer script as \"emotional\" and resembling that of a thriller, while also remarking that Nolan had \"Trojan-Horsed a biopic into a thriller\".[72]\nCasting\nOppenheimer marks the sixth collaboration between Nolan and Murphy, and the first starring Murphy as the lead. [for Oppenheimer] in his approach to trying to deal with the consequences of what he&#x27;d been involved with\", while also underscoring that it is a \"huge shift in perception about the reality of Oppenheimer&#x27;s perception\".[53] He wanted to execute a quick tonal shift after the atomic bombings of Hiroshima and Nagasaki, desiring to go from the \"highest triumphalism, the highest high, to the lowest low in the shortest amount of screen time possible\".[66] For the ending, Nolan chose to make it intentionally vague to be open to interpretation and refrained from being didactic or conveying specific messages in his work.","score":0.95617,"raw_content":null},{"title":"Oppenheimer (2023) - IMDb","url":"https://www.imdb.com/title/tt15398776/","content":"Oppenheimer: Directed by Christopher Nolan. With Cillian Murphy, Emily Blunt, Robert Downey Jr., Alden Ehrenreich. The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb.","score":0.95378,"raw_content":null},{"title":"&#x27;Oppenheimer&#x27; Review: A Man for Our Time - The New York Times","url":"https://www.nytimes.com/2023/07/19/movies/oppenheimer-review-christopher-nolan.html","content":"Instead, it is here that the film’s complexities and all its many fragments finally converge as Nolan puts the finishing touches on his portrait of a man who contributed to an age of transformational scientific discovery, who personified the intersection of science and politics, including in his role as a Communist boogeyman, who was transformed by his role in the creation of weapons of mass destruction and soon after raised the alarm about the dangers of nuclear war.\n He served as director of a clandestine weapons lab built in a near-desolate stretch of Los Alamos, in New Mexico, where he and many other of the era’s most dazzling scientific minds puzzled through how to harness nuclear reactions for the weapons that killed tens of thousands instantly, ending the war in the Pacific.\n Nolan integrates these black-and-white sections with the color ones, using scenes from the hearing and the confirmation — Strauss’s role in the hearing and his relationship with Oppenheimer directly affected the confirmation’s outcome — to create a dialectical synthesis. To signal his conceit, he stamps the film with the words “fission” (a splitting into parts) and “fusion” (a merging of elements); Nolan being Nolan, he further complicates the film by recurrently kinking up the overarching chronology — it is a lot.\n It’s also at Berkeley that Oppenheimer meets the project’s military head, Leslie Groves (a predictably good Damon), who makes him Los Alamos’s director, despite the leftist causes he supported — among them, the fight against fascism during the Spanish Civil War — and some of his associations, including with Communist Party members like his brother, Frank (Dylan Arnold).\n","score":0.92271,"raw_content":null},{"title":"Oppenheimer (2023) - Full Cast & Crew - IMDb","url":"https://www.imdb.com/title/tt15398776/fullcredits/","content":"Oppenheimer (2023) cast and crew credits, including actors, actresses, directors, writers and more. Menu. Movies. Release Calendar Top 250 Movies Most Popular Movies Browse Movies by Genre Top Box Office Showtimes & Tickets Movie News India Movie Spotlight. ... Peter Oppenheimer - Age 8 (uncredited) Adam Walker Federman ... MIT Student ...","score":0.91904,"raw_content":null},{"title":"Oppenheimer&#x27;s Grandson Reacts to New Christopher Nolan Film | TIME","url":"https://time.com/6297743/oppenheimer-grandson-movie-interview/","content":"July 25, 2023 3:32 PM EDT. M oviegoers turned out in droves this weekend for writer-director Christopher Nolan&#x27;s new film Oppenheimer, fueling an expectations-shattering domestic box office debut ...","score":0.91248,"raw_content":null}]"
+[tool/start] [1:tool:Calculator] Entering Tool run with input: "(2023 - 1970) * 365"
+[tool/end] [1:tool:Calculator] [2ms] Exiting Tool run with output: "19345"
+
+```
+
+```bash
+{
+  input: &#x27;Who directed the 2023 film Oppenheimer and what is their age? What is their age in days (assume 365 days per year)?&#x27;,
+  output: "So as of 2023, Christopher Nolan&#x27;s age is approximately 19,345 days.\n" +
+    &#x27;\n&#x27; +
+    &#x27;In summary:\n&#x27; +
+    &#x27;- The 2023 film Oppenheimer was directed by Christopher Nolan\n&#x27; +
+    &#x27;- Nolan was born on July 30, 1970, making his current age around 53 years old\n&#x27; +
+    &#x27;- Converted to days, Nolan is approximately 19,345 days old as of 2023&#x27;
+}
+
+``` ## Other callbacks[​](#other-callbacks) `Callbacks` are what we use to execute any functionality within a component outside the primary component logic. All of the above solutions use `Callbacks` under the hood to log intermediate steps of components. There are a number of `Callbacks` relevant for debugging that come with LangChain out of the box, like the [ConsoleCallbackHandler](https://api.js.langchain.com/classes/langchain_core.tracers_console.ConsoleCallbackHandler.html). You can also implement your own callbacks to execute custom functionality.
+
+#### Was this page helpful?
+
+
+
+#### You can also leave detailed feedback [on GitHub](https://github.com/langchain-ai/langchainjs/issues/new?assignees=&labels=03+-+Documentation&projects=&template=documentation.yml&title=DOC%3A+%3CPlease+write+a+comprehensive+title+after+the+%27DOC%3A+%27+prefix%3E).
+
+- [Tracing](#tracing)
+- [verbose](#verbose)[{ verbose: true }](#-verbose-true-)
+- [Tool({ ..., verbose: true })](#tool--verbose-true-)
+
+- [Other callbacks](#other-callbacks)
+
+Community
+
+- [LangChain Forum](https://forum.langchain.com/)
+- [Twitter](https://twitter.com/LangChainAI)
+
+GitHub
+
+- [Python](https://github.com/langchain-ai/langchain)
+- [JS/TS](https://github.com/langchain-ai/langchainjs)
+
+More
+
+- [Homepage](https://langchain.com)
+- [Blog](https://blog.langchain.dev)
+
+Copyright © 2025 LangChain, Inc.

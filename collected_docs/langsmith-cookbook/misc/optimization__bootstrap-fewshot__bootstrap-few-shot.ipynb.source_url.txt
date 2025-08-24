@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-cookbook@main/optimization/bootstrap-fewshot/bootstrap-few-shot.ipynb

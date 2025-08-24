@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-docs@main/docs/self_hosting/scripts/delete_a_workspace.mdx

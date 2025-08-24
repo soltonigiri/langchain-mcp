@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-docs@main/docs/administration/how_to_guides/organization_management/set_up_resource_tags.mdx

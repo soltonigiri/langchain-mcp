@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts / generated indexes
+collected_docs/_index/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+

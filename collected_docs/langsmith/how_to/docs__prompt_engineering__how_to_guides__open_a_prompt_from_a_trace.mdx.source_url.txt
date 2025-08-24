@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-docs@main/docs/prompt_engineering/how_to_guides/open_a_prompt_from_a_trace.mdx

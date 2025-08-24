@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-docs@main/docs/evaluation/how_to_guides/use_langchain_off_the_shelf_evaluators_old.mdx

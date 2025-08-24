@@ -1,0 +1,1 @@
+https://python.langchain.com/api_reference/core/documents/langchain_core.documents.base.Document.html/

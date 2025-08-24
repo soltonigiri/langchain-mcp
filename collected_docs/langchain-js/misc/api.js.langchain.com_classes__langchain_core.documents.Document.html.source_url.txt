@@ -1,0 +1,1 @@
+https://api.js.langchain.com/classes/_langchain_core.documents.Document.html/

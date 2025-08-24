@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-cookbook@main/feedback-examples/algorithmic-feedback/algorithmic_feedback.ipynb

@@ -1,0 +1,1 @@
+https://js.langchain.com/docs/integrations/chat/bedrock_converse/

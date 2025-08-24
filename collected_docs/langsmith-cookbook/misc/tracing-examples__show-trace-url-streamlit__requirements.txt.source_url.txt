@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-cookbook@main/tracing-examples/show-trace-url-streamlit/requirements.txt

@@ -1,0 +1,1 @@
+github:langchain-ai/langsmith-docs@main/docs/self_hosting/architectural_overview.mdx
